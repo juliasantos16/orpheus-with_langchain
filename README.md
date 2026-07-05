@@ -27,7 +27,8 @@
 <small>1. Clonar o repositório:</small>
 ```bash
 git clone [https://seu-repositorio-aqui.git](https://seu-repositorio-aqui.git)
-cd orpheus```
+cd orpheus
+```
 
 <small>2. Criar e ativar ambiente virtual:</small>
 ```bash
