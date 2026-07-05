@@ -27,17 +27,20 @@
 <small>1. Clonar o repositório:</small>
 ```bash
 git clone [https://seu-repositorio-aqui.git](https://seu-repositorio-aqui.git)
-cd orpheus
+cd orpheus```
 
 <small>2. Criar e ativar ambiente virtual:</small>
-bash
+```bash
 python -m venv venv
 venv\Scripts\activate
+```
 
 <small>3. Instalar dependências:</small>
-bash
+```bash
 pip install -r requirements.txt
+```
 
 <small>4. Rodar aplicação:</small>
-bash
+```bash
 streamlit run main.py
+```
