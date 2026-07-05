@@ -26,10 +26,15 @@ MODELOS = {
     }
 }
 
+
 K_CHUNKS_RECUPERADOS = 6
 
 
+LIMITE_CARACTERES_STUFFING = 100_000
+
+
 def cria_historico():
+
     return []
 
 
@@ -68,39 +73,48 @@ def carrega_modelo(provedor, modelo, api_key, tipo_arquivo, arquivo):
         st.error('Selecione ou faça upload de um arquivo antes de inicializar o Orpheus.')
         st.stop()
 
-    with st.spinner('Carregando, dividindo em chunks e gerando embeddings...'):
+    with st.spinner('Carregando o documento...'):
         documentos = carrega_arquivo(tipo_arquivo, arquivo)
 
         if not documentos:
             st.error('Não foi possível extrair conteúdo do arquivo/fonte informado.')
             st.stop()
 
+        texto_completo = '\n\n'.join(doc.page_content for doc in documentos)
+        tamanho = len(texto_completo)
 
-        vectorstore = cria_vectorstore(documentos, provedor, api_key)
+        if tamanho <= LIMITE_CARACTERES_STUFFING:
 
-        retriever = vectorstore.as_retriever(
-            search_type='mmr',
-            search_kwargs={'k': K_CHUNKS_RECUPERADOS, 'fetch_k': 20}
-        )
-        total_chunks = vectorstore.index.ntotal
+            modo_contexto = 'stuffing'
+            contexto_fixo = texto_completo
+            vectorstore = None
+            retriever = None
+        else:
+
+            modo_contexto = 'rag'
+            contexto_fixo = None
+            with st.spinner('Documento grande — dividindo em chunks e gerando embeddings...'):
+                vectorstore = cria_vectorstore(documentos, provedor, api_key)
+
+                retriever = vectorstore.as_retriever(
+                    search_type='mmr',
+                    search_kwargs={'k': K_CHUNKS_RECUPERADOS, 'fetch_k': 20}
+                )
 
 
     system_message = '''Você é um assistente amigável chamado Orpheus.
 
-    Você utiliza uma técnica chamada RAG (Retrieval-Augmented Generation):
-    em vez de receber o documento {tipo} inteiro, você recebe apenas os
-    trechos mais relevantes para a pergunta atual do usuário, buscados por
-    similaridade semântica.
+    Abaixo estão as informações disponíveis de um documento do tipo {tipo}
+    para você basear sua resposta.
 
-    TRECHOS RECUPERADOS:
+    CONTEÚDO DISPONÍVEL:
     ####
     {{context}}
     ####
 
-    Responda com base apenas nas informações acima. Se a resposta não estiver
-    nos trechos recuperados, diga claramente que não encontrou essa
-    informação no documento carregado (ela pode existir no documento, mas não
-    ter sido recuperada nessa busca) — não invente informações.
+    Responda com base nas informações acima. Se a resposta não estiver
+    claramente contida nelas, diga que não encontrou essa informação no
+    documento carregado — não invente informações.
 
     Sempre que houver $ na sua saída, substitua por S.'''.format(tipo=tipo_arquivo)
 
@@ -114,9 +128,15 @@ def carrega_modelo(provedor, modelo, api_key, tipo_arquivo, arquivo):
     chain = template | chat
 
     st.session_state['chain'] = chain
+    st.session_state['modo_contexto'] = modo_contexto
+    st.session_state['contexto_fixo'] = contexto_fixo
     st.session_state['retriever'] = retriever
     st.session_state['historico'] = cria_historico()
-    st.success(f'Orpheus inicializado! Documento dividido em {total_chunks} trechos indexados.')
+
+    if modo_contexto == 'stuffing':
+        st.success(f'Orpheus inicializado! Documento pequeno ({tamanho} caracteres) — carregado por completo.')
+    else:
+        st.success(f'Orpheus inicializado! Documento grande ({tamanho} caracteres) dividido em {vectorstore.index.ntotal} trechos indexados.')
 
 
 # PÁGINA INICIAL ===================================================================
@@ -125,8 +145,8 @@ def pagina_chat():
     st.header('Bem-vindo ao Orpheus', divider=True)
 
     chain = st.session_state.get('chain')
-    retriever = st.session_state.get('retriever')
-    if chain is None or retriever is None:
+    modo_contexto = st.session_state.get('modo_contexto')
+    if chain is None or modo_contexto is None:
         st.error('Carregue o Orpheus')
         st.stop()
 
@@ -145,11 +165,17 @@ def pagina_chat():
         chat = st.chat_message('human')
         chat.markdown(input_usuario)
 
-        docs_relevantes = retriever.invoke(input_usuario)
-        contexto = formata_documentos_recuperados(docs_relevantes)
+        docs_relevantes = None
+        if modo_contexto == 'stuffing':
+
+            contexto = st.session_state.get('contexto_fixo', '')
+        else:
+
+            retriever = st.session_state.get('retriever')
+            docs_relevantes = retriever.invoke(input_usuario)
+            contexto = formata_documentos_recuperados(docs_relevantes)
 
         chat = st.chat_message('ai')
-
         resposta = chat.write_stream(chain.stream({
             'input': input_usuario,
             'chat_history': historico,
